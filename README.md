@@ -110,7 +110,7 @@ tmpfs            6589608  2224   6587384   1% /etc/resolv.conf
 [root@zml-HP-Z420-Workstation linux-4.16.2]# make -j
 ```
 
-##制作根文件系统
+## 制作根文件系统
 
 ### 创建目录
 
@@ -155,10 +155,91 @@ tmpfs            6589608  2224   6587384   1% /etc/resolv.conf
 
 ## 编写 shell 程序
 
-首先，大家可以将本页底部助教编写的一个示例程序拷贝到`/usr/local/mini-os/rootfs`（不在chroot环境中的话，就是`/opt/ubuntu/usr/local/mini-os/rootfs`），命名为`init.c`。然后在该目录下执行：
+### 让 shell 程序更健壮
+
+#### 处理不良输入
+
+在拆解命令行部分，遇到空格后跳过紧跟其后的所有空格即可。
+
+```c
+while (*args[i + 1] && isblank(*args[i + 1]))
+    args[i + 1]++;
+```
+
+#### 处理错误
+
+##### 读入流发生错误
+
+在 `fgets()` 函数之后立即检查错误。
+
+```c
+if (ferror(stdin))
+{
+    perror("Input stream error!");
+    continue;
+}
+```
+
+##### fork 失败
+
+若操作系统内存耗尽或进程数量过多导致子进程无法创建，`fork()` 会返回 -1。
+
+```c
+if (pid < 0)
+{
+    perror("Failed to fork!");
+    return 255;
+}
+```
+
+##### 调用失败
+
+`execvp()` 在程序调用成功后不会返回，否则会返回 -1。
+
+```c
+if (pid == 0)
+{
+    execvp(args[0], args);
+    perror("Failed to execute!");
+    return 255;
+}
+```
+
+### 支持管道
+
+
+
+### 支持修改环境变量
+
+使用 `setenv()` 函数即可修改环境变量。
+
+```c
+if (strcmp(args[0], "export") == 0)
+{
+    int n = strlen(args[1]);
+    int i = 0;
+    while (args[1][i] && args[1][i] != '=')
+        i++;
+    if (!args[1][i])
+        continue;
+    args[1][i] = '\0';
+    setenv(args[1], args[1] + i + 1, 1);
+    continue;
+}
+```
+
+### 支持文件重定向
+
+
+
+### 准备测试 shell 程序
+
+将写好的程序拷贝到 `./mini-os/rootfs`，命名为 `init.c`，然后编译为 `init` 。
 
 ```shell
-gcc -static -o init init.c
+[root@zml-HP-Z420-Workstation exp2]# cd mini-os/rootfs
+[root@zml-HP-Z420-Workstation rootfs]# vim init.c
+[root@zml-HP-Z420-Workstation rootfs]# gcc -static -o init init.c
 ```
 
 ## 运行操作系统
