@@ -6,7 +6,7 @@
 
 ### 在 chroot 环境中安装 ArchLinux
 
-由于服务器上的操作系统是 Ubuntu，若要不借助虚拟化技术在上面搭建 ArchLinux 开发环境，可以通过使用 chroot 来实现。
+由于服务器上的操作系统是 Ubuntu，若要不借助虚拟化技术在上面搭建 ArchLinux 开发环境，可以通过使用 chroot 来实现。（也可以使用比 chroot 完善的 Docker）
 
 #### 下载 bootstrap 镜像
 
@@ -47,9 +47,9 @@ zml@zml-HP-Z420-Workstation:~/archlinux % sudo root.x86_64/bin/arch-chroot root.
 
 现在已经在 chroot 里面搭建好了 ArchLinux 的最简环境，里面只有非常少的软件。此时需要安装 ArchLinux 专用的包管理器 pacman，然后就可以用 pacman 在 chroot 环境中方便地安装所需软件了。
 
-#### 禁用 pacman 的 checkspace
+#### 禁用 pacman 的硬盘剩余空间检查
 
-由于在 chroot 环境中已挂载文件系统表 `/etc/mtab` 中没有 `/` 的记录，这会导致 pacman 检查硬盘剩余空间时出错。运行 `df` 命令可以看出没有 rootfs 的记录。
+由于在 chroot 环境中**已挂载文件系统表** `/etc/mtab` 中没有 `/` 的记录，这会导致 pacman 检查硬盘剩余空间时出错。运行 `df` 命令可以看出没有 rootfs 的记录。
 
 ```shell
 [root@zml-HP-Z420-Workstation /]# df
@@ -230,6 +230,20 @@ if (strcmp(args[0], "export") == 0)
 
 ### 支持文件重定向
 
+### 支持获取环境变量
+
+### 支持临时设置环境变量
+
+### 支持命令别名
+
+### 支持 slash
+
+### 支持括号
+
+### 支持分号
+
+### 支持后台
+
 
 
 ### 准备测试 shell 程序
@@ -281,4 +295,3 @@ chmod +x run.sh
 ```shell
 [root@zml-HP-Z420-Workstation exp2]# ./run.sh
 ```
-
