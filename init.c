@@ -12,14 +12,20 @@ void err(char * s)
 	fprintf(stderr, "%s\n", s);
 }
 
+const char * z(const char * s)
+{
+	return s == NULL ? "" : s;
+}
+
 int zsh(char **args)
 {
 	int i, j, cnt;
+	char *pos;
 
 	/* 没有命令 */
 	if (!args[0])
 		return 0;
-
+	
 	/* 处理非括号内分号 */
 	i = 0;
 	cnt = 0;
@@ -156,26 +162,79 @@ int zsh(char **args)
 		return stat;
 	}
 
-	/* slash */
+	/* 波浪线符号处理 */
 	i = 0;
 	while (args[i])
 	{
-
+		char* pos;
+		if (pos = strchr(args[i], '~'))
+		{
+			*pos = '\0';
+			char s[strlen(args[i]) + 10];
+			s[0]='\0';
+			strcat(s, args[i]);
+			strcat(s, "$HOME");
+			strcat(s, pos + 1);
+			args[i] = s;
+			return(zsh(args));
+		}
 		i++;
 	}
 
 	/* 获取环境变量 */
-
-	/* 临时环境变量 */
-	if(strchr(args[0], '=') != NULL)
+	i = 0;
+	while (args[i])
 	{
+		if (pos = strchr(args[i], '$'))
+		{
+			j = 0;
+			while (isalnum(pos[j + 1]) || pos[j + 1] == '_')
+			{
+				pos[j] = pos[j + 1];
+				j++;
+			}
+			pos[j] = '\0';
+			char s[strlen(z(getenv(pos))) + strlen(pos + j + 1) + 10];
+			s[0]='\0';
+			strcat(s, z(getenv(pos)));
+			strcat(s, pos + j + 1);
+			args[i] = s;
+			return(zsh(args));
+		}
+		i++;
 	}
 
-	/* 命令别名 */
-
-	
+	/* 临时环境变量 */
+	if((pos = strchr(args[0], '=')))
+	{
+		*pos = '\0';
+		char s[strlen(z(getenv(args[0]))) + 10];
+		int flag = getenv(args[0]) == NULL;
+		strcpy(s, z(getenv(args[0])));
+		setenv(args[0], pos + 1, 1);
+		int stat = zsh(args + 1);
+		if(flag) unsetenv(args[0]); else setenv(args[0], s, 1);
+		return stat;
+	}
 
 	/* 内建命令 */
+	/* 处理别名 */
+	{
+		char s[strlen(args[0]) + 10];
+		s[0] = '\0';
+		strcat(s, "__alias__");
+		strcat(s, args[0]);
+		if (getenv(s))
+		{
+			args[0] = getenv(s);
+			char b[strlen(args[0]) + 10];
+			strcpy(b, args[0]);
+			unsetenv(s);
+			int stat = zsh(args);
+			setenv(s, b, 1);
+			return stat;
+		}
+	}
 	if (strcmp(args[0], "cd") == 0)
 	{
 		if (args[1])
@@ -189,15 +248,34 @@ int zsh(char **args)
 		return 0;
 	}
 	if (strcmp(args[0], "export") == 0)
-	{
-		int n = strlen(args[1]);
+	{		
 		int i = 0;
-		while (args[1][i] && args[1][i] != '=')
-			i++;
-		if (!args[1][i])
-			return 0;
+		while (args[1][i] && args[1][i] != '=') i++;
+		if (!args[1][i]) return 0;
 		args[1][i] = '\0';
 		setenv(args[1], args[1] + i + 1, 1);
+		return 0;
+	}
+	if (strcmp(args[0], "alias") == 0)
+	{
+		int i = 0;
+		while (args[1][i] && args[1][i] != '=') i++;
+		if (!args[1][i]) return 0;
+		args[1][i] = '\0';
+		char s[strlen(args[1]) + 10];
+		s[0] = '\0';
+		strcat(s, "__alias__");
+		strcat(s, args[1]);
+		setenv(s, args[1] + i + 1, 1);
+		return 0;
+	}
+	if (strcmp(args[0], "unalias") == 0)
+	{
+		char s[strlen(args[1]) + 10];
+		s[0] = '\0';
+		strcat(s, "__alias__");
+		strcat(s, args[1]);
+		unsetenv(s);
 		return 0;
 	}
 	if (strcmp(args[0], "exit") == 0)
@@ -253,9 +331,9 @@ int main()
 		int j = 0;
 		for (i = 0; inp[i] != '\n'; i++)
 		{
-			if (strchr("();&|<>", inp[i]) != NULL) cmd[j++] = ' ';
+			if (strchr("();&|<>", inp[i])) cmd[j++] = ' ';
 			cmd[j++] = inp[i];
-			if (strchr("();&|<>", inp[i]) != NULL) cmd[j++] = ' ';
+			if (strchr("();&|<>", inp[i])) cmd[j++] = ' ';
 		}
 		cmd[j] = '\0';
 
@@ -263,7 +341,9 @@ int main()
 		args[0] = cmd;
 		while (isblank(args[0][0])) args[0]++;
 		for (i = 0; *args[i]; i++)
+		{
 			for (args[i + 1] = args[i] + 1; *args[i + 1]; args[i + 1]++)
+			{
 				if (isblank(*args[i + 1]))
 				{
 					*args[i + 1] = '\0';
@@ -272,6 +352,8 @@ int main()
 						args[i + 1]++;
 					break;
 				}
+			}
+		}
 		args[i] = NULL;
 
 		/* 递归处理 */
