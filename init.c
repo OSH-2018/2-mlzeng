@@ -218,23 +218,6 @@ int zsh(char **args)
 	}
 
 	/* 内建命令 */
-	/* 处理别名 */
-	{
-		char s[strlen(args[0]) + 10];
-		s[0] = '\0';
-		strcat(s, "__alias__");
-		strcat(s, args[0]);
-		if (getenv(s))
-		{
-			args[0] = getenv(s);
-			char b[strlen(args[0]) + 10];
-			strcpy(b, args[0]);
-			unsetenv(s);
-			int stat = zsh(args);
-			setenv(s, b, 1);
-			return stat;
-		}
-	}
 	if (strcmp(args[0], "cd") == 0)
 	{
 		if (args[1])
@@ -254,28 +237,6 @@ int zsh(char **args)
 		if (!args[1][i]) return 0;
 		args[1][i] = '\0';
 		setenv(args[1], args[1] + i + 1, 1);
-		return 0;
-	}
-	if (strcmp(args[0], "alias") == 0)
-	{
-		int i = 0;
-		while (args[1][i] && args[1][i] != '=') i++;
-		if (!args[1][i]) return 0;
-		args[1][i] = '\0';
-		char s[strlen(args[1]) + 10];
-		s[0] = '\0';
-		strcat(s, "__alias__");
-		strcat(s, args[1]);
-		setenv(s, args[1] + i + 1, 1);
-		return 0;
-	}
-	if (strcmp(args[0], "unalias") == 0)
-	{
-		char s[strlen(args[1]) + 10];
-		s[0] = '\0';
-		strcat(s, "__alias__");
-		strcat(s, args[1]);
-		unsetenv(s);
 		return 0;
 	}
 	if (strcmp(args[0], "exit") == 0)
