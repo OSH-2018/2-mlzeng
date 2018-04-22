@@ -157,6 +157,8 @@ tmpfs            6589608  2224   6587384   1% /etc/resolv.conf
 
 ### 程序整体架构
 
+递归式，将复杂的 shell 命令。往后可以看到，递归式结构对于内存管理和
+
 
 
 ### 让 shell 程序更健壮
@@ -209,9 +211,213 @@ if (pid == 0)
 }
 ```
 
+### 支持括号
+
+```c
+i = 0;
+if (strcmp(args[0], "(") == 0)
+{
+	while (args[i]) i++;
+	args[0] = NULL;
+	args[i - 1] = NULL;
+	zsh(args + 1);
+	return 0;
+}
+```
+
+### 支持分号
+
+用一个计数器 cnt 判断分号是否在括号中，直到找到第一个不在括号中的分号，然后递归处理。
+
+```c
+i = 0;
+cnt = 0;
+while (args[i])
+{
+	if (strcmp(args[i], "(") == 0) cnt++;
+	if (strcmp(args[i], ")") == 0) cnt--;
+	if (strcmp(args[i], ";") == 0 && !cnt) break;
+	i++;
+}
+if (args[i])
+{
+	args[i] = NULL;
+	zsh(args);
+	zsh(args + i + 1);
+	return 0;
+}
+```
+
+### 支持后台
+
+```c
+i = 0;
+while (args[i]) i++;
+if (i && strcmp(args[i - 1], "&") == 0)
+{
+	args[i - 1] = NULL;
+	pid_t pid = fork();
+	if (pid == 0) exit(zsh(args));
+	return 0;
+}
+```
+
+测试样例：
+
+```shell
+# echo start;((sleep 2;echo 2s)&;(sleep 1;echo 1s);(sleep 2;echo 3s))&;echo 0s
+start
+0s
+# 1s
+2s
+3s
+```
+
+1s 之前出现#号是因为输出 0s 之后当前的 shell 运行结束，下一个 shell 已经开始运行了。这是符合期望的。
+
 ### 支持管道
 
+```c
+i = 0;
+while (args[i] && strcmp(args[i] , "|")) i++;
+if (args[i])
+{
+	args[i] = NULL;
+	int p[2];
+	pipe(p)；
+	pid_t pid = fork();
+	if (pid == 0)
+	{
+		close(p[0]);
+		dup2(p[1], STDOUT_FILENO);
+		int stat = zsh(args);
+		close(p[1]);
+		exit(stat);
+	}
+	close(p[1]);
+	int stdin_copy_fd = dup(STDIN_FILENO);
+	dup2(p[0], STDIN_FILENO);
+	zsh(args + i + 1);
+	close(p[0]);
+	dup2(stdin_copy_fd, STDIN_FILENO);
+	int stat;
+	waitpid(pid, &stat, WUNTRACED);
+	return stat;
+}
+```
 
+测试样例：
+
+```shell
+# cat > a
+Hello
+# cat >> a
+Hello
+# cat < a | cat | cat | tee b | cat | cat | cat > c
+# cat a
+Hello
+Hello
+# cat b
+Hello
+Hello
+# cat c
+Hello
+Hello
+#
+```
+
+### 支持文件重定向
+
+```c
+i = 0;
+while (args[i] && strcmp(args[i], "<")) i++;
+if (args[i])
+{
+	int stdin_copy_fd = dup(STDIN_FILENO);
+	int fd = open(args[i+1], O_RDONLY);
+	dup2(fd, STDIN_FILENO);
+	while (args[i + 2])
+	{
+		args[i] = args[i + 2];
+		i++;
+	}
+	args[i] = NULL;
+	int stat = zsh(args);
+	close(fd);
+	dup2(stdin_copy_fd, STDIN_FILENO);
+	return stat;
+}
+i = 0;
+while (args[i] && strcmp(args[i], ">")) i++;
+if (args[i])
+{
+	int append = 0;
+	if (args[i + 1] && strcmp(args[i + 1], ">") == 0) append = 1;
+	int stdout_copy_fd = dup(STDOUT_FILENO);
+	int fd = open(args[i + 1 + append], O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC));
+	dup2(fd, STDOUT_FILENO);
+	while (args[i + 2 + append])
+	{
+		args[i] = args[i + 2 + append];
+		i++;
+	}
+	args[i] = NULL;
+	int stat = zsh(args);
+	close(fd);
+	dup2(stdout_copy_fd, STDOUT_FILENO);
+	return stat;
+}
+```
+
+### 支持 slash
+
+查找`~` 替换为 `$HOME` ，交给后面部分处理。
+
+```c
+i = 0;
+while (args[i])
+{
+	char* pos;
+	if (pos = strchr(args[i], '~'))
+	{
+		*pos = '\0';
+		char s[strlen(args[i]) + 10];
+		s[0]='\0';
+		strcat(s, args[i]);
+		strcat(s, "$HOME");
+		strcat(s, pos + 1);
+		args[i] = s;
+		return(zsh(args));
+	}
+	i++;
+}
+```
+
+### 支持获取环境变量
+
+```c
+i = 0;
+while (args[i])
+{
+	if (pos = strchr(args[i], '$'))
+	{
+		j = 0;
+		while (isalnum(pos[j + 1]) || pos[j + 1] == '_')
+		{
+			pos[j] = pos[j + 1];
+			j++;
+		}
+		pos[j] = '\0';
+		char s[strlen(z(getenv(pos))) + strlen(pos + j + 1) + 10];
+		s[0]='\0';
+		strcat(s, z(getenv(pos)));
+		strcat(s, pos + j + 1);
+		args[i] = s;
+		return(zsh(args));
+	}
+	i++;
+}
+```
 
 ### 支持修改环境变量
 
@@ -222,33 +428,29 @@ if (strcmp(args[0], "export") == 0)
 {
     int n = strlen(args[1]);
     int i = 0;
-    while (args[1][i] && args[1][i] != '=')
-        i++;
-    if (!args[1][i])
-        continue;
+    while (args[1][i] && args[1][i] != '=') i++;
+    if (!args[1][i]) continue;
     args[1][i] = '\0';
     setenv(args[1], args[1] + i + 1, 1);
     continue;
 }
 ```
 
-### 支持文件重定向
-
-### 支持获取环境变量
-
 ### 支持临时设置环境变量
 
-### 支持命令别名
-
-### 支持 slash
-
-### 支持括号
-
-### 支持分号
-
-### 支持后台
-
-
+```c
+if((pos = strchr(args[0], '=')))
+{
+	*pos = '\0';
+	char s[strlen(z(getenv(args[0]))) + 10];
+	int flag = getenv(args[0]) == NULL;
+	strcpy(s, z(getenv(args[0])));
+	setenv(args[0], pos + 1, 1);
+	int stat = zsh(args + 1);
+	if(flag) unsetenv(args[0]); else setenv(args[0], s, 1);
+	return stat;
+}
+```
 
 ### 准备测试 shell 程序
 

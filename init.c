@@ -7,7 +7,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 
-void err(char * s)
+void err(const char * s)
 {
 	fprintf(stderr, "%s\n", s);
 }
@@ -148,7 +148,7 @@ int zsh(char **args)
 		int append = 0;
 		if (args[i + 1] && strcmp(args[i + 1], ">") == 0) append = 1;
 		int stdout_copy_fd = dup(STDOUT_FILENO);
-		int fd = open(args[i+1+append], O_WRONLY | O_CREAT | (append ? O_APPEND : 0));
+		int fd = open(args[i + 1 + append], O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC));
 		dup2(fd, STDOUT_FILENO);
 		while (args[i + 2 + append])
 		{
