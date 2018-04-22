@@ -157,9 +157,7 @@ tmpfs            6589608  2224   6587384   1% /etc/resolv.conf
 
 ### 程序整体架构
 
-递归式，将复杂的 shell 命令。往后可以看到，递归式结构对于内存管理和
-
-
+采用递归式实现，将复杂的 shell 命令不断分解成更简单的 shell 命令，然后再运行对应的二进制文件。往后可以看到，递归式实现非常利于内存管理和环境变量等处理，并且逻辑非常清晰，不同功能部分的代码耦合度低（增删功能只需要在对应部分增删代码），代码非常简洁。
 
 ### 让 shell 程序更健壮
 
@@ -211,7 +209,21 @@ if (pid == 0)
 }
 ```
 
+##### 管道创建失败
+
+`pipe()` 创建管道失败后会返回 -1。
+
+```c
+if (pipe(p) < 0)
+{
+	err("Failed to create pipe!");
+	return 255;
+}
+```
+
 ### 支持括号
+
+只处理出现在最外层且在最前面的括号，不同语句中的括号将被后面的分号处理部分分开处理，同一个语句中嵌套的括号将在递归过程中被这部分处理。
 
 ```c
 i = 0;
@@ -227,7 +239,7 @@ if (strcmp(args[0], "(") == 0)
 
 ### 支持分号
 
-用一个计数器 cnt 判断分号是否在括号中，直到找到第一个不在括号中的分号，然后递归处理。
+用一个计数器 cnt 判断分号是否在括号中，直到找到第一个不在括号中的分号，处理前面的部分，然后递归处理后面的部分。
 
 ```c
 i = 0;
@@ -248,7 +260,9 @@ if (args[i])
 }
 ```
 
-### 支持后台
+### 支持后台运行
+
+`fork` 出子进程递归处理 `&` 符号前的整块语句，父进程不使用 `waitpid` 即可。
 
 ```c
 i = 0;
@@ -273,9 +287,11 @@ start
 3s
 ```
 
-1s 之前出现#号是因为输出 0s 之后当前的 shell 运行结束，下一个 shell 已经开始运行了。这是符合期望的。
+1s 之前出现 # 号是因为输出 0s 之后当前的 shell 运行结束，下一个 shell 已经开始运行了。这是符合期望的。
 
 ### 支持管道
+
+从左向右扫描到第一个 `|` 之后，创建管道，覆盖对应的文件描述符，处理前面的部分的同时 `fork` 出一个进程递归处理后面的部分，父进程需要在运行结束前关闭管道并**恢复**原来的文件描述符表（子进程可以不用因为直接被回收掉了）。
 
 ```c
 i = 0;
@@ -306,27 +322,9 @@ if (args[i])
 }
 ```
 
-测试样例：
-
-```shell
-# cat > a
-Hello
-# cat >> a
-Hello
-# cat < a | cat | cat | tee b | cat | cat | cat > c
-# cat a
-Hello
-Hello
-# cat b
-Hello
-Hello
-# cat c
-Hello
-Hello
-#
-```
-
 ### 支持文件重定向
+
+发现重定向符号后，覆盖对应的文件描述符，然后将重定向符号及其对应文件名去掉，直到剩下一个没有重定向符号的 shell 命令，递归处理之，结束后恢复原来的文件描述符。
 
 ```c
 i = 0;
@@ -369,9 +367,37 @@ if (args[i])
 }
 ```
 
+测试样例：
+
+```shell
+# cat > a
+echo Hello
+# ./init < a > b
+# cat b
+Hello
+```
+
+```shell
+# cat > a
+Hello
+# cat >> a
+Hello
+# cat < a | cat | cat | tee b | cat | cat | cat > c
+# cat a
+Hello
+Hello
+# cat b
+Hello
+Hello
+# cat c
+Hello
+Hello
+#
+```
+
 ### 支持 slash
 
-查找`~` 替换为 `$HOME` ，交给后面部分处理。
+查找 `~` 替换为 `$HOME` ，交给后面部分处理。
 
 ```c
 i = 0;
@@ -394,6 +420,8 @@ while (args[i])
 ```
 
 ### 支持获取环境变量
+
+调用 `getenv()` 函数即可修改环境变量，做简单的字符串替换后递归处理即可。
 
 ```c
 i = 0;
@@ -419,9 +447,27 @@ while (args[i])
 }
 ```
 
+### 支持临时设置环境变量
+
+设置环境变量，递归处理后面的 shell 命令，结束后还原环境变量即可。
+
+```c
+if ((pos = strchr(args[0], '=')))
+{
+	*pos = '\0';
+	char s[strlen(z(getenv(args[0]))) + 10];
+	int flag = getenv(args[0]) == NULL;
+	strcpy(s, z(getenv(args[0])));
+	setenv(args[0], pos + 1, 1);
+	int stat = zsh(args + 1);
+	if (flag) unsetenv(args[0]); else setenv(args[0], s, 1);
+	return stat;
+}
+```
+
 ### 支持修改环境变量
 
-使用 `setenv()` 函数即可修改环境变量。
+这应该作为 shell 内置命令来实现，调用 `setenv()` 函数即可修改环境变量。
 
 ```c
 if (strcmp(args[0], "export") == 0)
@@ -433,22 +479,6 @@ if (strcmp(args[0], "export") == 0)
     args[1][i] = '\0';
     setenv(args[1], args[1] + i + 1, 1);
     continue;
-}
-```
-
-### 支持临时设置环境变量
-
-```c
-if((pos = strchr(args[0], '=')))
-{
-	*pos = '\0';
-	char s[strlen(z(getenv(args[0]))) + 10];
-	int flag = getenv(args[0]) == NULL;
-	strcpy(s, z(getenv(args[0])));
-	setenv(args[0], pos + 1, 1);
-	int stat = zsh(args + 1);
-	if(flag) unsetenv(args[0]); else setenv(args[0], s, 1);
-	return stat;
 }
 ```
 
